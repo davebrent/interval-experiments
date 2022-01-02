@@ -36,7 +36,7 @@ fn test_index_256() {
         assert_eq!(a.max, b.max, "query {}", i);
         assert_eq!(a.total_duration, b.total_duration, "query {}", i);
 
-        let a = actual.query(interval);
+        let a = actual.query(interval).flatten().collect::<Vec<_>>();
         let b = baseline.query(interval);
 
         assert_eq!(a.len(), b.len(), "query {}", i);

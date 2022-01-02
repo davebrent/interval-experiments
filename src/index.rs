@@ -53,7 +53,7 @@ where
     }
 
     pub fn push(&mut self, index: usize, interval: Interval, value: &V) {
-        if self.intervals.is_empty() || index % self.interval == 0 {
+        if index % self.interval == 0 {
             let mut aggregate = A::initial();
             aggregate.aggregate(&interval, value);
 
@@ -158,7 +158,7 @@ where
         visitor.output
     }
 
-    pub fn query<I>(&self, window: I) -> Vec<&V>
+    pub fn query<I>(&self, window: I) -> impl Iterator<Item = &[V]>
     where
         I: Into<Interval>,
     {
@@ -170,11 +170,10 @@ where
 
         self.query_with(window, &mut visitor);
 
-        let mut output = Vec::with_capacity(visitor.count);
-        for range in visitor.output {
-            output.extend(&self.slow_lane.values[range]);
-        }
-        output
+        visitor
+            .output
+            .into_iter()
+            .map(move |range| &self.slow_lane.values[range])
     }
 
     pub fn query_with<I, Q>(&self, window: I, visitor: &mut Q)
@@ -194,12 +193,13 @@ where
             for lane in &self.fast_lanes {
                 let lane_index = index / lane.interval;
                 match lane.intervals.get(lane_index) {
-                    Some(interval) if window.contains(*interval) => {}
+                    Some(interval) if window.contains(*interval) => {
+                        visitor.visit_fast_lane(lane, index);
+                        index += lane.interval;
+                        continue 'search;
+                    }
                     _ => continue,
                 };
-                visitor.visit_fast_lane(lane, index);
-                index += lane.interval;
-                continue 'search;
             }
 
             // Otherwise advance to the next multiple of `base_size` in the slow

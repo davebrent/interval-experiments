@@ -84,7 +84,7 @@ fn interval_index_reading_benchmarks(
         group.bench_with_input(
             BenchmarkId::new("implementation", i),
             interval,
-            |b, interval| b.iter(|| index.query(interval)),
+            |b, interval| b.iter(|| index.query(interval).collect::<Vec<_>>()),
         );
     }
 
