@@ -10,7 +10,7 @@ pub trait QueryVisitor<V, A> {
 }
 
 pub struct IntervalIndex<V, A> {
-    base_size: usize,
+    order: usize,
     fast_lanes: Vec<FastLane<V, A>>,
     slow_lane: SlowLane<V>,
 }
@@ -84,20 +84,20 @@ impl<V, A> IntervalIndex<V, A>
 where
     A: Aggregate<Value = V>,
 {
-    pub fn new(max_lanes: usize, base_size: usize) -> Self {
+    pub fn new(max_lanes: usize, order: usize) -> Self {
         let slow_lane = SlowLane {
             intervals: vec![],
             values: vec![],
         };
 
         let mut fast_lanes: Vec<_> = (0..max_lanes)
-            .map(|i| FastLane::new(base_size.pow(i as u32 + 1)))
+            .map(|i| FastLane::new(order.pow(i as u32 + 1)))
             .collect();
 
         fast_lanes.reverse();
 
         Self {
-            base_size,
+            order,
             fast_lanes,
             slow_lane,
         }
@@ -127,7 +127,7 @@ where
                 }
                 offset += 1;
             }
-            offset = offset.checked_sub(1).unwrap_or(0) * self.base_size;
+            offset = offset.checked_sub(1).unwrap_or(0) * self.order;
         }
 
         offset
@@ -202,9 +202,9 @@ where
                 };
             }
 
-            // Otherwise advance to the next multiple of `base_size` in the slow
+            // Otherwise advance to the next multiple of `order` in the slow
             // lane, before trying again with the fast lane.
-            let iterations = self.base_size - (index % self.base_size);
+            let iterations = self.order - (index % self.order);
             let start = index.min(length - 1);
             let end = (index + iterations).min(length);
             let intervals = &self.slow_lane.intervals[start..end];
