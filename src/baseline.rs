@@ -2,7 +2,7 @@ use std::fs::read_to_string;
 use std::marker::PhantomData;
 use std::path::Path;
 
-use crate::aggregate::{Aggregate, MergeInfo};
+use crate::aggregate::Aggregate;
 use crate::interval::Interval;
 
 pub struct BaselineIntervalIndex<V, A> {
@@ -68,7 +68,7 @@ where
         I: Into<Interval>,
     {
         let window = window.into();
-        let mut out = A::initial();
+        let mut out = A::empty();
 
         for (i, interval) in self.intervals.iter().enumerate() {
             if interval.start > window.end {
@@ -76,9 +76,7 @@ where
             }
             if interval.overlaps(window) {
                 let value = &self.values[i];
-                let mut aggregate = A::initial();
-                aggregate.aggregate(interval, value);
-                out.merge(&MergeInfo { weight: 1.0 }, &aggregate);
+                out.aggregate(&A::initial(interval, value));
             }
         }
 

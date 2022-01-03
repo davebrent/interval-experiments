@@ -41,7 +41,7 @@ fn interval_index_writing_benchmarks(
 
     group.bench_function("implementation", |b| {
         b.iter(|| {
-            let mut index = BenchIndex::new(4, 8);
+            let mut index = BenchIndex::new(8);
             for (id, interval) in intervals {
                 index.push(interval, *id);
             }
@@ -65,7 +65,7 @@ fn interval_index_reading_benchmarks(
     intervals: &[(u64, Interval)],
     queries: &[Interval],
 ) {
-    let mut index = BenchIndex::new(4, 8);
+    let mut index = BenchIndex::new(8);
     let mut baseline = BaselineIndex::new();
 
     for (id, interval) in intervals {

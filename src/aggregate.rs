@@ -2,15 +2,12 @@ use std::marker::PhantomData;
 
 use crate::interval::Interval;
 
-pub struct MergeInfo {
-    pub weight: f32,
-}
-
 pub trait Aggregate {
     type Value;
-    fn initial() -> Self;
-    fn aggregate(&mut self, interval: &Interval, value: &Self::Value);
-    fn merge(&mut self, info: &MergeInfo, other: &Self);
+    fn empty() -> Self;
+    fn initial(interval: &Interval, value: &Self::Value) -> Self;
+    fn aggregate(&mut self, other: &Self);
+    fn weight(&mut self, _weight: f32) {}
 }
 
 pub struct DefaultStatistics<T> {
@@ -24,7 +21,7 @@ pub struct DefaultStatistics<T> {
 impl<T> Aggregate for DefaultStatistics<T> {
     type Value = T;
 
-    fn initial() -> Self {
+    fn empty() -> Self {
         Self {
             min: 0,
             max: 0,
@@ -34,19 +31,26 @@ impl<T> Aggregate for DefaultStatistics<T> {
         }
     }
 
-    fn aggregate(&mut self, interval: &Interval, _: &Self::Value) {
+    fn initial(interval: &Interval, _: &Self::Value) -> Self {
         let duration = interval.end - interval.start;
-        self.min = duration.min(self.min);
-        self.max = duration.max(self.max);
-        self.total_duration += duration;
-        self.count += 1;
+        Self {
+            min: duration,
+            max: duration,
+            total_duration: duration,
+            count: 1,
+            phantom: PhantomData,
+        }
     }
 
-    fn merge(&mut self, info: &MergeInfo, other: &Self) {
+    fn aggregate(&mut self, other: &Self) {
         self.min = other.min.min(self.min);
         self.max = other.max.max(self.max);
-        self.total_duration +=
-            (other.total_duration as f64 * info.weight as f64) as u64;
         self.count += other.count;
+        self.total_duration += other.total_duration;
+    }
+
+    fn weight(&mut self, weight: f32) {
+        let duration = self.total_duration;
+        self.total_duration = (duration as f64 * weight as f64) as u64;
     }
 }

@@ -1,7 +1,8 @@
 use std::marker::PhantomData;
+use std::mem::size_of;
 use std::ops::Range;
 
-use crate::aggregate::{Aggregate, MergeInfo};
+use crate::aggregate::Aggregate;
 use crate::interval::Interval;
 
 pub trait QueryVisitor<V, A> {
@@ -10,14 +11,15 @@ pub trait QueryVisitor<V, A> {
 }
 
 pub struct IntervalIndex<V, A> {
-    order: usize,
-    fast_lanes: Vec<FastLane<V, A>>,
-    slow_lane: SlowLane<V>,
+    pub order: usize,
+    pub max_top_level: usize,
+    pub fast_lanes: Vec<FastLane<V, A>>,
+    pub slow_lane: SlowLane<V>,
 }
 
 #[derive(Clone, Debug)]
 pub struct FastLane<V, A> {
-    interval: usize,
+    pub interval: usize,
     intervals: Vec<Interval>,
     aggregations: Vec<A>,
     phantom: PhantomData<V>,
@@ -43,29 +45,28 @@ impl<V, A> FastLane<V, A>
 where
     A: Aggregate<Value = V>,
 {
-    pub fn new(interval: usize) -> Self {
+    pub fn new(interval: usize, capacity: usize) -> FastLane<V, A> {
         FastLane {
             interval,
-            intervals: vec![],
-            aggregations: vec![],
+            intervals: Vec::with_capacity(capacity),
+            aggregations: Vec::with_capacity(capacity),
             phantom: PhantomData,
         }
     }
 
-    pub fn push(&mut self, index: usize, interval: Interval, value: &V) {
-        if index % self.interval == 0 {
-            let mut aggregate = A::initial();
-            aggregate.aggregate(&interval, value);
+    pub fn len(&self) -> usize {
+        self.intervals.len()
+    }
 
-            self.intervals.push(interval);
-            self.aggregations.push(aggregate);
-        } else {
-            let index = index / self.interval;
-            let other = &mut self.intervals[index];
-            other.end = other.end.max(interval.end);
+    fn push(&mut self, interval: Interval, aggregate: A) {
+        self.intervals.push(interval);
+        self.aggregations.push(aggregate);
+    }
 
-            self.aggregations[index].aggregate(&interval, value);
-        }
+    fn update(&mut self, index: usize, interval: Interval, aggregate: A) {
+        let other = &mut self.intervals[index];
+        other.end = other.end.max(interval.end);
+        self.aggregations[index].aggregate(&aggregate);
     }
 }
 
@@ -84,20 +85,21 @@ impl<V, A> IntervalIndex<V, A>
 where
     A: Aggregate<Value = V>,
 {
-    pub fn new(max_lanes: usize, order: usize) -> Self {
+    pub fn new(order: usize) -> Self {
+        let max_top_level = 4096 / size_of::<Interval>();
+
         let slow_lane = SlowLane {
-            intervals: vec![],
-            values: vec![],
+            // If we expect N elements in the initial fast lane, then we are
+            // expecting N * order elements in the slow lane
+            intervals: Vec::with_capacity(order * max_top_level),
+            values: Vec::with_capacity(order * max_top_level),
         };
 
-        let mut fast_lanes: Vec<_> = (0..max_lanes)
-            .map(|i| FastLane::new(order.pow(i as u32 + 1)))
-            .collect();
-
-        fast_lanes.reverse();
+        let fast_lanes = vec![FastLane::new(order, max_top_level)];
 
         Self {
             order,
+            max_top_level,
             fast_lanes,
             slow_lane,
         }
@@ -111,10 +113,40 @@ where
         let index = self.slow_lane.len();
 
         for lane in &mut self.fast_lanes {
-            lane.push(index, interval, &value);
+            let aggregate = A::initial(&interval, &value);
+            if index % lane.interval == 0 {
+                lane.push(interval, aggregate);
+            } else {
+                lane.update(index / lane.interval, interval, aggregate);
+            }
         }
 
         self.slow_lane.push(interval, value);
+
+        if self.fast_lanes[0].len() == self.max_top_level {
+            self.rebuild_top_level();
+        }
+    }
+
+    fn rebuild_top_level(&mut self) {
+        let top = &self.fast_lanes[0];
+
+        let interval = self.order.pow(self.fast_lanes.len() as u32 + 1);
+        let mut fast_lane = FastLane::new(interval, self.max_top_level);
+
+        let items = top.intervals.iter().zip(top.aggregations.iter());
+        for (i, (interval, aggregate)) in items.enumerate() {
+            let mut copy = A::empty();
+            copy.aggregate(&aggregate);
+
+            if i % self.order == 0 {
+                fast_lane.push(*interval, copy);
+            } else {
+                fast_lane.update(i / self.order, *interval, copy);
+            }
+        }
+
+        self.fast_lanes.insert(0, fast_lane);
     }
 
     fn first_fastlane_overlap(&self, window: Interval) -> usize {
@@ -151,7 +183,7 @@ where
         I: Into<Interval>,
     {
         let mut visitor = AggregateVisitor {
-            output: A::initial(),
+            output: A::empty(),
             phantom: PhantomData,
         };
         self.query_with(window, &mut visitor);
@@ -229,15 +261,13 @@ where
 {
     fn visit_fast_lane(&mut self, lane: &FastLane<V, A>, index: usize) {
         let lane_index = index / lane.interval;
-        let info = MergeInfo { weight: 1.0 };
-        self.output.merge(&info, &lane.aggregations[lane_index]);
+        self.output.aggregate(&lane.aggregations[lane_index]);
     }
 
     fn visit_slow_lane(&mut self, lane: &SlowLane<V>, index: usize) {
-        let info = MergeInfo { weight: 1.0 };
-        let mut aggregate = A::initial();
-        aggregate.aggregate(&lane.intervals[index], &lane.values[index]);
-        self.output.merge(&info, &aggregate);
+        let interval = &lane.intervals[index];
+        let value = &lane.values[index];
+        self.output.aggregate(&A::initial(interval, value));
     }
 }
 

@@ -13,7 +13,7 @@ fn test_index_256() {
 
     intervals.sort_by_key(|row| row[1]);
 
-    let mut actual = Index::new(7, 8);
+    let mut actual = Index::new(8);
     let mut baseline = BaselineIndex::new();
 
     for row in intervals {
