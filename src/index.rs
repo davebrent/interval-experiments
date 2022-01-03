@@ -127,7 +127,7 @@ where
                 }
                 offset += 1;
             }
-            offset = offset.checked_sub(1).unwrap_or(0) * self.order;
+            offset *= self.order;
         }
 
         offset
